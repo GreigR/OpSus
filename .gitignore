@@ -1,0 +1,7 @@
+*.png
+*.pdf
+*.R
+*.html
+.Rdata
+.Rhistory
+*.docs

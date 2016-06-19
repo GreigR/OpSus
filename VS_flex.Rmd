@@ -1,0 +1,539 @@
+---
+title: "Vital signs"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+---
+
+```{r setup, echo=FALSE, warning=FALSE, message = FALSE}
+library(flexdashboard)
+library(knitr)
+library(rmarkdown)
+library(dplyr)
+library(lubridate)
+library(qcc)
+library(tseries)
+library(forecast)
+library(ggplot2)
+
+opts_chunk$set(dev = "png", fig.path = "/home/greig/R-projects/Vital_Signs")
+
+# load the data
+ALOS.raw <- read.csv("/home/greig/R-projects/Vital_Signs/VS_ALOS.csv", header = TRUE, stringsAsFactors = FALSE, check.names = TRUE, strip.white = TRUE, na.strings = c("", "NULL", "NA"))
+
+ALOS <- ALOS.raw
+
+# declare the variables
+ALOS$DDATE <- as.Date(ALOS$DDATE)
+ALOS$EPISODE <- as.factor(ALOS$EPISODE)
+ALOS$FACILITY <- as.factor(ALOS$FACILITY)
+ALOS$ADMAGE <- as.integer(ALOS$ADMAGE)
+ALOS$GENDER <- as.factor(ALOS$GENDER)
+ALOS$ETHGROUP <-  as.factor(ALOS$ETHGROUP)
+ALOS$DOMTLA <- as.factor(ALOS$DOMTLA)
+ALOS$DOMDHB <- as.factor(ALOS$DOMDHB)
+ALOS$DOMCODE <- as.factor(ALOS$DOMCODE)
+ALOS$SPECIALTY <- as.factor(ALOS$SPECIALTY)
+ALOS$ARRANGED <- as.factor(ALOS$ARRANGED)
+ALOS$LOS <- as.integer(ALOS$LOS)
+ALOS$LINE <- as.factor(ALOS$LINE)
+ALOS$DRGCODE <- as.factor(ALOS$DRGCODE)
+ALOS$PRINCIPLDIAGNOSISCODE <- as.factor(ALOS$PRINCIPLDIAGNOSISCODE)
+
+ALOS <- ALOS %>% 
+  mutate(Week = week(DDATE), Month = month(DDATE), Year = year(DDATE))
+
+ALOS <- ALOS %>% 
+  filter(DDATE < "2016-06-02 00:00:00")
+```
+#Introduction {.sidebar}
+Vital signs (Part B) is focused on the analysis of patient flow. It provides detail and context regarding acute admissions. Some analysis of services that determine ALOS is also provided.
+
+#ED
+
+##Layout {.tabset .tabset-fade}
+
+###Presentations
+```{r ED-present, warning=FALSE, message = FALSE, comment="", results="hide"}
+
+ED_arr <- read.csv("/home/greig/R-projects/Vital_Signs/ED_arr.csv", header = TRUE, stringsAsFactors = FALSE, check.names = TRUE, strip.white = TRUE, na.strings = c("", "NULL", "NA"))
+
+ED_arr$EDArrTime <- as.Date(ED_arr$EDArrTime)
+ED_arr <- ED_arr %>% 
+  mutate(Year = year(EDArrTime), Month = month(EDArrTime), Week = week(EDArrTime))
+
+ED_arr <- ED_arr %>% 
+  filter(EDArrTime < "2016-06-02 00:00:00")
+
+ED_count <- ED_arr %>% 
+  group_by(Year, Week) %>% 
+  summarise(Count = n()) %>% 
+  ungroup()
+
+c_ED <- select(ED_count, Count)
+ewma(c_ED,  title = "Presentations / week for ED", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+tsED <- ts(c_ED, frequency = 52, start = 2010)
+tsED.dec1 <- decompose(tsED, type = "additive")
+plot(tsED.dec1)
+
+```
+
+###Admissions
+```{r ED-Admit, warning=FALSE, message = FALSE, comment="", results="hide"}
+
+EM <- ALOS %>% 
+  filter(ARRANGED == "Acute" & LINE == "Emergency")
+
+totEM <- EM %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+c_totEM <- select(totEM, Count)
+ewma(c_totEM,  title = "Admissions / week for Emergency Department", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsEM <- ts(c_totEM, frequency = 52, start = 2010)
+tsEM.dec1 <- decompose(tsEM, type = "additive")
+plot(tsEM.dec1)
+```
+
+###ALOS 
+```{r ED-ALOS, warning=FALSE, message = FALSE, comment="", results="hide"}
+
+m_totEM <- select(totEM, Mean)
+ewma(m_totEM, title = "ALOS for Emergency Department admissions", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+```
+
+###Forecast-6 months
+```{r ED-forecast, warning=FALSE, message = FALSE, comment="", results="hide"}
+
+EM2 <- ALOS %>% 
+  filter(ARRANGED == "Acute" & LINE == "Emergency" & DDATE >= "2014-01-01 00:00:00")
+
+totEM2 <- EM2 %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+
+c_totEM2 <- select(totEM2, Count)
+
+tsEM2 <- ts(c_totEM2, frequency = 52, start = 2014)
+
+tsEM2.hwl <- HoltWinters(tsEM2, 
+                         beta = NULL,
+                         gamma = NULL, 
+                         seasonal = "multiplicative")
+tsEM2.fc3 <- forecast.HoltWinters(tsEM2.hwl,
+                                  h=26)
+plot(tsEM2.fc3)
+
+```
+
+###Forecast-1 yr
+```{r ED-forecast2, warning=FALSE, message = FALSE, comment="", results="hide"}
+
+tsEM2.fc4 <- forecast.HoltWinters(tsEM2.hwl,
+                                  h=52)
+plot(tsEM2.fc4)
+
+```
+
+#CSB
+
+##Layout {.tabset .tabset-fade}
+
+###ALOS 
+```{r MCH-ALOS, warning=FALSE, message = FALSE, comment="", results="hide"}
+MCH <- ALOS %>% 
+  filter(LINE != "Emergency" & LINE != "Mental Health")
+
+totMCH <- MCH %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_MCH <- select(totMCH, Mean)
+ewma(m_MCH, title = "ALOS for CSB", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+
+```
+
+###Admissions
+```{r MCH-Admit, echo=FALSE, warning=FALSE, message = FALSE, comment="", results="hide"}
+c_MCH <- select(totMCH, Count)
+ewma(c_MCH,  title = "Admissions / week for CSB", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+tsMCH <- ts(c_MCH, frequency = 52, start = 2010)
+tsMCH.dec1 <- decompose(tsMCH, type = "additive")
+plot(tsMCH.dec1)
+```
+
+###Forecast-6 months
+```{r MCH-FC, echo=FALSE, warning=FALSE, message = FALSE, comment="", results="hide"}
+tsMCH.hwl <- HoltWinters(tsMCH, 
+                         beta = NULL,
+                         gamma = NULL, 
+                         seasonal = "multiplicative")
+tsMCH.fc3 <- forecast.HoltWinters(tsMCH.hwl,
+                                  h=26)
+plot(tsMCH.fc3)
+```
+
+###Forecast-1 yr
+```{r MCH-FC2, echo=FALSE, warning=FALSE, message = FALSE, comment="", results="hide"}
+
+tsMCH.fc4 <- forecast.HoltWinters(tsMCH.hwl,
+                                  h=52)
+plot(tsMCH.fc4)
+```
+
+#GenMed
+
+##layout {.tabset .tabset-fade}
+
+###ALOS
+```{r GenMed_ALOS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+GenMed <- ALOS %>% 
+  filter(ARRANGED == "Acute" & SPECIALTY == "General Internal Medical Services")
+
+totGenMed <- GenMed %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_totGenMed <- select(totGenMed, Mean)
+ewma(m_totGenMed, title = "ALOS for acute General Medicine", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+```
+
+###MAPU admissions
+```{r GenMed_Admit, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+c_totGenMed <- select(totGenMed, Count)
+ewma(c_totGenMed,  title = "MAPU admissions/week", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions/week")
+
+tsGenMed <- ts(c_totGenMed, frequency = 52, start = 2010)
+tsGenMed.dec1 <- decompose(tsGenMed, type = "additive")
+plot(tsGenMed.dec1)
+
+```
+
+###MAPU discharges
+```{r mapu-discharge, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+MAPU_disc <- GenMed %>% 
+  filter(LOS<2)
+
+MAPU_count <- MAPU_disc %>% 
+  group_by(Year, Week) %>% 
+  summarise(Count = n()) %>% 
+  ungroup()
+
+
+MAPU_percent <- right_join(totGenMed, MAPU_count, by=c("Year", "Week"))
+
+MAPU_percent <- MAPU_percent %>% 
+  mutate(Percent = round((Count.y/Count.x)*100, digits = 2))
+
+ewma(MAPU_percent$Percent,  title = "MAPU % discharges/week", xlab = "Weeks since 1.Jan.2010", ylab = "Percentage discharges/week")
+
+```
+
+###Long Stay
+```{r GenMed_LS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+LS_GenMed <- GenMed %>% 
+  filter(LOS>10)
+
+LS_Med <- LS_GenMed %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+cLS_Med <- select(LS_Med, Count)
+ewma(cLS_Med, title = "Number of patients admitted/week with LOS >10 days", xlab = "weeks since 1.Jan.2010", ylab = "admissions/week")
+ts_cLS_Med <- ts(cLS_Med, frequency = 52, start = 2010)
+tsLS_Med.dec1 <- decompose(ts_cLS_Med, type = "additive")
+plot(tsLS_Med.dec1)
+
+```
+
+###Intermediate Stay
+```{r GenMed_IS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+IS_GenMed <- GenMed %>% 
+  filter(LOS <= 10 & LOS >= 6)
+
+IS_Med <- IS_GenMed %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+cIS_Med <- select(IS_Med, Count)
+ewma(cIS_Med, title = "Number of patients admitted/week with LOS 6-9 days", xlab = "weeks since 1.Jan.2010", ylab = "admissions/week")
+ts_cIS_Med <- ts(cIS_Med, frequency = 52, start = 2010)
+tsIS_Med.dec1 <- decompose(ts_cIS_Med, type = "additive")
+plot(tsIS_Med.dec1)
+
+```
+
+###Medium Stay
+```{r GenMed_MS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+MS_GenMed <- GenMed %>% 
+  filter(LOS <= 5 & LOS >= 2)
+
+MS_Med <- MS_GenMed %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+cMS_Med <- select(MS_Med, Count)
+ewma(cMS_Med, title = "Number of patients admitted/week with LOS 2-5 days", xlab = "weeks since 1.Jan.2010", ylab = "admissions/week")
+ts_cMS_Med <- ts(cMS_Med, frequency = 52, start = 2010)
+tsMS_Med.dec1 <- decompose(ts_cMS_Med, type = "additive")
+plot(tsMS_Med.dec1)
+
+```
+
+###1 Day Stay
+```{r GenMed_vSS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+vSS_GenMed <- GenMed %>% 
+  filter(LOS>=0 & LOS <2)
+
+vSS_GenMed <- vSS_GenMed %>% 
+  filter(DDATE >= "2014-01-01 00:00:00")
+
+vSS_Med <- vSS_GenMed %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+vcSS_Med <- select(vSS_Med, Count)
+ewma(vcSS_Med, title = "Number of patients admitted/week with LOS <=24hr days", xlab = "weeks since 1.Jan.2014", ylab = "admissions/week")
+vts_cSS_Med <- ts(vcSS_Med, frequency = 52, start = 2014)
+vtsSS_Med.dec1 <- decompose(vts_cSS_Med, type = "additive")
+plot(vtsSS_Med.dec1)
+
+```
+
+#GenSurg
+
+##layout{.tabset .tabset-fade}
+
+###ALOS - service
+```{r GenSurg-ALOS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+GenSurg <- ALOS %>% 
+  filter(SPECIALTY == "General Surgical Services")
+
+totGenSurg <- GenSurg %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_totGenSurg <- select(totGenSurg, Mean)
+ewma(m_totGenSurg, title = "ALOS for acute General Surgery", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+c_totGenSurg <- select(totGenSurg, Count)
+```
+
+###Total Admissions
+```{r GenSurg-Admit, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+c_totGenSurg <- select(totGenSurg, Count)
+ewma(c_totGenSurg,  title = "Admissions / week for acute General Surgery", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsGenSurg <- ts(c_totGenSurg, frequency = 52, start = 2010)
+tsGenSurg.dec1 <- decompose(tsGenSurg, type = "additive")
+plot(tsGenSurg.dec1)
+
+```
+
+###Acute Admissions
+```{r GenSurg-Acute_Admit, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+SGenSurg <- ALOS %>% 
+  filter(ARRANGED == "Acute" & SPECIALTY == "General Surgical Services")
+
+SSGenSurg <- SGenSurg %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+c_SSGenSurg <- select(SSGenSurg, Count)
+ewma(c_SSGenSurg,  title = "Acute Gen Surgery admissions / week", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+ts_SSGenSurg <- ts(c_SSGenSurg, frequency = 52, start = 2010)
+ts_SSGenSurg.dec1 <- decompose(ts_SSGenSurg, type = "additive")
+plot(ts_SSGenSurg.dec1)
+
+```
+
+#Ortho
+
+##layout {.tabset .tabset-fade}
+
+###ALOS - service
+```{r Ortho-ALOS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+Ortho <- ALOS %>% 
+  filter(SPECIALTY == "Orthopaedic Services")
+
+totOrtho <- Ortho %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_totOrtho <- select(totOrtho, Mean)
+ewma(m_totOrtho, title = "ALOS for Orthopaedic Surgery", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+
+```
+
+###Total Admissions
+```{r Ortho-Admit, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+c_totOrtho <- select(totOrtho, Count)
+ewma(c_totOrtho,  title = "Admissions / week for Orthopaedic Surgery", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsOrtho <- ts(c_totOrtho, frequency = 52, start = 2010)
+tsOrtho.dec1 <- decompose(tsOrtho, type = "additive")
+plot(tsOrtho.dec1)
+
+```
+
+###Acute Admissions
+```{r Ortho-Acute, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+acuteOrtho <- ALOS %>% 
+  filter(ARRANGED == "Acute" & SPECIALTY == "Orthopaedic Services")
+
+tot_acuteOrtho <- acuteOrtho %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+c_totacuteOrtho <- select(tot_acuteOrtho, Count)
+ewma(c_totacuteOrtho,  title = "Admissions / week for acute Orthopaedic Surgery", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsacuteOrtho <- ts(c_totacuteOrtho, frequency = 52, start = 2010)
+tsacuteOrtho.dec1 <- decompose(tsacuteOrtho, type = "additive")
+plot(tsacuteOrtho.dec1)
+
+```
+
+
+###Elective Admissions
+```{r Ortho-Elective, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+electOrtho <- ALOS %>% 
+  filter(ARRANGED != "Acute" & SPECIALTY == "Orthopaedic Services")
+
+tot_electOrtho <- electOrtho %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+c_totelectOrtho <- select(tot_electOrtho, Count)
+ewma(c_totelectOrtho,  title = "Admissions / week for elective Orthopaedic Surgery", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tselectOrtho <- ts(c_totelectOrtho, frequency = 52, start = 2010)
+tselectOrtho.dec1 <- decompose(tselectOrtho, type = "additive")
+plot(tselectOrtho.dec1)
+
+```
+
+#ElderHealth
+
+##layout{.tabset .tabset-fade}
+
+###ALOS-service
+```{r EH-ALOS, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+EH <- ALOS %>% 
+  filter(LINE == "Elderly")
+
+totEH <- EH %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_totEH <- select(totEH, Mean)
+ewma(m_totEH, title = "ALOS for Elder Health", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+
+tsEHm <- ts(m_totEH, frequency = 52, start = 2010)
+tsEHm.dec1 <- decompose(tsEHm, type = "additive")
+plot(tsEHm.dec1)
+
+```
+
+###Admissions-service
+```{r EH-Admit, echo=FALSE, warning=FALSE, message = FALSE, results="hide"}
+
+c_totEH <- select(totEH, Count)
+ewma(c_totEH,  title = "Admissions / week for Elder Health", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsEH <- ts(c_totEH, frequency = 52, start = 2010)
+tsEH.dec1 <- decompose(tsEH, type = "additive")
+plot(tsEH.dec1)
+
+```
+
+#Mental Health
+
+##layout{.tabset .tabset-fade}
+
+###ALOS-service
+```{r MH-ALOS, echo=FALSE, warning=FALSE, message = FALSE, comment="", results='hide'}
+MH <- ALOS %>% 
+  filter(LINE == "Mental Health")
+
+totMH <- MH %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_totMH <- select(totMH, Mean)
+ewma(m_totMH, title = "ALOS for Mental Health", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+c_totMH <- select(totMH, Count)
+
+```
+
+###Admissions-service
+```{r MH-Admit, echo=FALSE, warning=FALSE, message = FALSE, comment="", results='hide'}
+
+c_totMH <- select(totMH, Count)
+ewma(c_totMH,  title = "Admissions / week for Mental Health", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsMH <- ts(c_totMH, frequency = 52, start = 2010)
+tsMH.dec1 <- decompose(tsMH, type = "additive")
+plot(tsMH.dec1)
+
+```
+
+#Child Health
+
+##layout{.tabset .tabet-fade}
+
+###ALOS-acute
+```{r paeds-alos, echo=FALSE, warning=FALSE, message = FALSE, comment="", results='hide'}
+
+Paed <- ALOS %>% 
+  filter(ARRANGED == "Acute" & LINE == "Paediatric")
+
+totPaed <- Paed %>% 
+  group_by(Year, Week) %>% 
+  summarise(Mean = mean(LOS, na.rm = TRUE), Count = n()) %>% 
+  ungroup()
+
+m_totPaed <- select(totPaed, Mean)
+ewma(m_totPaed, title = "ALOS for acute Child Health admissions", xlab = "Weeks since 1.Jan.2010", ylab = "ALOS")
+```
+
+###Admissions-acute
+```{r paeds-admit, echo=FALSE, warning=FALSE, message = FALSE, comment="", results='hide'}
+c_totPaed <- select(totPaed, Count)
+ewma(c_totPaed,  title = "Admissions / week for acute Child Health admissions", xlab = "Weeks since 1.Jan.2010", ylab = "Admissions / week")
+
+tsPaed <- ts(c_totPaed, frequency = 52, start = 2010)
+tsPaed.dec1 <- decompose(tsPaed, type = "additive")
+plot(tsPaed.dec1)
+
+```
